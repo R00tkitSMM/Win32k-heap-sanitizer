@@ -101,6 +101,7 @@ __declspec(naked) my_function_detour_RtlFreeHeap()
 		mov edi, ebx; // address of heap chunk
 		rep stos byte ptr es:[edi]
 		POPAD
+}
 ```
 I tested this detector with some old UAF vulnerabilities in Win32k and a driver to detect UAF in win32k.sys. Maybe there is another way to do this, though! (I don’t know, maybe with GFlags, we can enable PageHeap for the kernel).
 
