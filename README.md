@@ -1,26 +1,19 @@
-# Win32k-Fuzzer
-****
-credit to
-https://twitter.com/R00tkitSMM (firozimaysam@gmail.com)
-****
-Win32k.sys for Windows  is like Java for internet.
+Win32k.sys for Windows is similar to Java for the internet.
 
-this project have two part:
+This project consists of two parts:
 
-1. UAF detector  in Win32k
-2. Win32k.sys fuzzer 
+UAF (Use-After-Free) detector in Win32k
+Win32k.sys fuzzer
+I’ve just published the first part.
 
-So i just publish First part
+Win32k.sys for Windows is akin to Java for the internet.
 
-Win32k.sys for Windows  is like Java for internet.
+In recent times, 0-day kernel vulnerabilities have become more valuable due to the limitations imposed by sandboxes. Every RCE exploit now requires an additional phase to bypass these restrictions in order to achieve full system access.
 
-in this days 0 day in kernel is more valuable than before because of limitation forced by sandboxes , every RCE Exploit need second phrase to bypass this Limitation to gain full system access.
+Many local privilege escalation vulnerabilities are based on flaws in Win32k, particularly how it handles or uses objects. In most cases, Win32k uses freed memory, leading to use-after-free vulnerabilities.
 
-many published local privilege escalation vulnerabilities is based  on Bug in Win32k and  how it handle/use Objects , in most vulnerabilities win32k use freed memory that lead to use after free vulnerabilities.
-
-Win32 object allocation : 
-based on Object type win32 with help of HMAllocObject function use heap or Pool for Allocating memory for object
-```c++
+Win32k uses HMAllocObject to allocate memory, and the function utilizes different memory management subsystems based on the object type, either from the heap or from the pool, for object management. These memory management functions include:
+```
 int __stdcall HMAllocObject(int a1, PVOID Object, char a3, ULONG Size)
 {
 	....
@@ -58,30 +51,24 @@ LABEL_28:
 	....
 	....
   }
-  ````
-  
-1. DesktopAlloc ( Heap )
-2. SharedAlloc ( Heap )
-3. in32AllocPoolWithQuotaTagZInit, Win32AllocPoolWithTagZInit (Pool )
+  ```
+DesktopAlloc (function uses heap)
+SharedAlloc (function uses heap)
+in32AllocPoolWithQuotaTagZInit, Win32AllocPoolWithTagZInit (function uses pool)
+For example, a Menu object uses DesktopAlloc, while an Accelerator object uses Pool.
 
+For objects that use heap memory, when the object's life ends, the OS calls RtlFreeHeap to free the used memory. However, after RtlFreeHeap returns, the freed memory still contains the old/valid contents. If another part of win32k.sys uses the freed memory, nothing will happen because it uses memory with old contents (no BSOD occurs), and the bug will be missed.
 
-for example Menu object use DesktopAlloc and Accelerator use Pool.
+Until now, researchers have typically discovered these types of bugs through reverse engineering. They must allocate an object of the same size to trigger a crash. But how can one know when the OS will use the freed memory?
 
-for objects that use Heap memory ,when object life end, OS call RtlFreeHeap to free used memory,after RtlFreeHeap return  freed memory still have old/valid contents, so if other part of win32k.sys use freed memory nothing will happen because it use memory with old contents ( no BSOD ) and we will miss Bug.
-until now researchers just find this kind of bugs with reverse engineering . they  must allocate object in same size to produce crash. and how know when OS will use freed memory ? 
-
-in user mode  code we can  use gflags to enable page Heap
+In user-mode code, we can use GFlags to enable PageHeap system-wide. This doesn't affect the heap implementation in the kernel. There is also a "special pool" that can be enabled with the verifier, but it doesn't help us with heap-based objects or memory.
 ```
 gflags.exe /i iexplore.exe +hpa +ust to to enable the page Heap (HPA)
 ```
-we also can enable page Heap system wide bug this dont effect Heap implementation in kernel 
-thre was also "special pool" that can be enable with verifier but it dont help us for Heap based objects/memory.
+So, my idea is to patch RtlFreeHeap and fill the freed memory with invalid content, such as 0c0c0c0c.
 
-
-so my idea is patching RtlFreeHeap and fill freed memory with invalid content like 0c0c0c0c .
-for finding Heap chunk size i used unexported function RtlSizeHeap(thanks @ponez for finding this function)
-
-```C++
+With the help of the RtlSizeHeap function (thanks to @ponez for discovering this function), we can detect when win32k uses freed heap memory. We can also automatically determine how the OS uses freed memory—whether it reads, writes, or executes from the freed memory.
+```
 __declspec(naked) my_function_detour_RtlFreeHeap()
 {
 	//PVOID  func=RtlSizeHeap;;
@@ -114,16 +101,6 @@ __declspec(naked) my_function_detour_RtlFreeHeap()
 		mov edi, ebx; // address of heap chunk
 		rep stos byte ptr es:[edi]
 		POPAD
-````
-
-
-
-with help of this function we can detect when win32k use freed heap memory.  we can also automatically find out how OS useing freed memory(does it use free memory to write/read/execute? )
-
-i cheked this Detector with some old UAF vulnerabilities in Win32k and Driver detect UAF in win32k.sys.
-maybe ther was another was to do this!?(i dont know maybe with gflags we can enable page heap for kernel) 
-
-
-
-
+```
+I tested this detector with some old UAF vulnerabilities in Win32k and a driver to detect UAF in win32k.sys. Maybe there is another way to do this, though! (I don’t know, maybe with GFlags, we can enable PageHeap for the kernel).
 
